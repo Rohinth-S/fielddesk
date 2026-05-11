@@ -8,20 +8,16 @@ beforeEach(() => {
 });
 describe("FieldDesk lifecycle", () => {
   it("blocks illegal status transitions", async () => {
-    const d = await request(app)
-      .post("/auth/register")
-      .send({
-        email: "d@test.local",
-        password: "correct-horse-battery",
-        role: "dispatcher",
-      });
-    const t = await request(app)
-      .post("/auth/register")
-      .send({
-        email: "t@test.local",
-        password: "correct-horse-battery",
-        role: "technician",
-      });
+    const d = await request(app).post("/auth/register").send({
+      email: "d@test.local",
+      password: "correct-horse-battery",
+      role: "dispatcher",
+    });
+    const t = await request(app).post("/auth/register").send({
+      email: "t@test.local",
+      password: "correct-horse-battery",
+      role: "technician",
+    });
     const l = await request(app)
       .post("/auth/login")
       .send({ email: "d@test.local", password: "correct-horse-battery" });

@@ -3,6 +3,7 @@ import cors from "cors";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { db } from "./db.js";
+import { createSignedUpload } from "./storage.js";
 import {
   hashPassword,
   verifyPassword,
@@ -193,7 +194,7 @@ app.post("/jobs/:id/status", auth, (req: A, res) => {
   audit(req.user!.sub, "job.status_changed", j.id, p.data);
   res.json({ id: j.id, status: p.data.status });
 });
-app.post("/jobs/:id/media/presign", auth, (req: A, res) => {
+app.post("/jobs/:id/media/presign", auth, async (req: A, res) => {
   const j = db
     .prepare("SELECT * FROM jobs WHERE id=?")
     .get(req.params.id) as any;
@@ -219,14 +220,20 @@ app.post("/jobs/:id/media/presign", auth, (req: A, res) => {
     null,
     new Date().toISOString(),
   );
-  res
-    .status(201)
-    .json({
+  try {
+    const signed = await createSignedUpload(key, 600);
+    res.status(201).json({
       mediaId: id,
       objectKey: key,
-      uploadUrl: `https://s3.local/${key}`,
-      expiresIn: 600,
+      uploadUrl: signed.uploadUrl,
+      uploadToken: signed.token,
+      expiresIn: signed.expiresIn,
+      provider: signed.provider,
     });
+  } catch (error) {
+    console.error(error);
+    res.status(502).json({ error: "storage provider unavailable" });
+  }
 });
 app.post("/jobs/:id/media/:mediaId/complete", auth, (req: A, res) => {
   const m = db
