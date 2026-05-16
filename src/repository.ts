@@ -351,6 +351,5 @@ export async function createRepository(): Promise<FieldDeskRepository> {
         : { rejectUnauthorized: false },
     max: 10,
   });
-  await pool.query(POSTGRES_SCHEMA);
   return new PostgresRepository(pool, pool);
 }
