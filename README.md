@@ -59,6 +59,6 @@ Passwords are stored with `scrypt` and a random per-user salt; JWT signing requi
 
 ## Production adapters
 
-Set `DB_URL` or `SUPABASE_DB_URL` to select the managed Postgres connectivity check. Because the HTTP handlers still use the synchronous SQLite repository, production startup intentionally fails fast when these variables are present unless `POSTGRES_ROUTES_ENABLED=true`; the concrete remaining task is to migrate the route repository calls to an async Postgres implementation before enabling that flag. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` (or `STORAGE_BUCKET`) for signed uploads. The service-role key is server-only and must never be placed in the Expo client. Local tests omit these values and continue using the Node SQLite adapter.
+Set `DB_URL` or `SUPABASE_DB_URL` with `POSTGRES_ROUTES_ENABLED=true` to select the async managed Postgres repository. The HTTP handlers use parameterized Postgres queries against the checked-in FieldDesk schema; local tests omit these values and use SQLite. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` (or `STORAGE_BUCKET`) for signed uploads. The service-role key is server-only and must never be placed in the mobile client.
 
 Startup does not run DDL against the managed database; apply the checked-in SQL migration before enabling Postgres routes.
