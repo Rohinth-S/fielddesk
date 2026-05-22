@@ -8,4 +8,8 @@ ALTER TABLE fielddesk_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fielddesk_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fielddesk_media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fielddesk_audit ENABLE ROW LEVEL SECURITY;
+CREATE POLICY service_role_full_access ON fielddesk_users FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY service_role_full_access ON fielddesk_jobs FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY service_role_full_access ON fielddesk_media FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY service_role_full_access ON fielddesk_audit FOR ALL TO service_role USING (true) WITH CHECK (true);
 
