@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 export type Role = "dispatcher" | "technician" | "admin";
-export type Claims = { sub: string; email: string; role: Role };
+export type Claims = { sub: string; email: string; role: Role; tenantId: string };
 const configuredSecret = process.env.JWT_SECRET;
 if (
   process.env.NODE_ENV === "production" &&

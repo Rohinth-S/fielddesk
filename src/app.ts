@@ -84,6 +84,7 @@ const user = z.object({
   email: z.string().email(),
   password: z.string().min(12),
   role: z.enum(["dispatcher", "technician", "admin"]).default("technician"),
+  tenantId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/).default("default"),
 });
 app.post("/auth/register", async (req, res) => {
   const p = user.safeParse(req.body);
@@ -97,8 +98,9 @@ app.post("/auth/register", async (req, res) => {
       email: p.data.email.toLowerCase(),
       role: p.data.role,
       passwordHash: hashPassword(p.data.password),
+      tenantId: p.data.tenantId,
     });
-    res.status(201).json({ id, email: p.data.email, role: p.data.role });
+    res.status(201).json({ id, email: p.data.email, role: p.data.role, tenantId: p.data.tenantId });
   } catch {
     res.status(409).json({ error: "email exists" });
   }
@@ -114,8 +116,8 @@ app.post("/auth/login", async (req, res) => {
   if (!u || !verifyPassword(p.data.password, u.password_hash))
     return res.status(401).json({ error: "invalid credentials" });
   res.json({
-    token: token({ sub: u.id, email: u.email, role: u.role }),
-    user: { id: u.id, email: u.email, role: u.role },
+    token: token({ sub: u.id, email: u.email, role: u.role, tenantId: u.tenant_id ?? "default" }),
+    user: { id: u.id, email: u.email, role: u.role, tenantId: u.tenant_id ?? "default" },
   });
 });
 const job = z.object({
@@ -139,18 +141,19 @@ app.post("/jobs", auth, allow("dispatcher", "admin"), async (req: A, res) => {
     site: p.data.site,
     dueAt: p.data.dueAt,
     createdBy: req.user!.sub,
+    tenantId: req.user!.tenantId ?? "default",
   });
   await audit(req.user!.sub, "job.created", id, p.data);
   res.status(201).json({ id, ...p.data, status: "queued" });
 });
 app.get("/jobs", auth, async (req: A, res) =>
   res.json(
-    await (await getRepository()).listJobs(req.user!.role, req.user!.sub),
+    await (await getRepository()).listJobs(req.user!.role, req.user!.sub, req.user!.tenantId),
   ),
 );
 app.get("/jobs/dispatch", auth, async (req: A, res) => {
   const repo = await getRepository();
-  const jobs = await repo.listJobs(req.user!.role, req.user!.sub);
+  const jobs = await repo.listJobs(req.user!.role, req.user!.sub, req.user!.tenantId);
   const page = buildDispatchPage(jobs, {
     site: typeof req.query.site === "string" ? req.query.site : undefined,
     status: typeof req.query.status === "string" ? req.query.status : undefined,
@@ -162,7 +165,7 @@ app.get("/jobs/dispatch", auth, async (req: A, res) => {
   res.json(page);
 });
 app.get("/jobs/:id/sla", auth, async (req: A, res) => {
-  const job = await (await getRepository()).getJob(String(req.params.id));
+  const job = await (await getRepository()).getJob(String(req.params.id), req.user!.tenantId);
   if (!job) return res.status(404).json({ error: "job not found" });
   const sla = classifySla(job);
   res.json({ jobId: job.id, dueAt: job.due_at, status: job.status, ...sla });
@@ -176,10 +179,10 @@ app.post(
     if (!p.success)
       return res.status(400).json({ error: "technicianId required" });
     const repo = await getRepository();
-    const tech = await repo.getTechnician(p.data.technicianId);
+    const tech = await repo.getTechnician(p.data.technicianId, req.user!.tenantId);
     if (!tech || tech.role !== "technician")
       return res.status(422).json({ error: "user is not a technician" });
-    const j = await repo.getJob(String(req.params.id));
+    const j = await repo.getJob(String(req.params.id), req.user!.tenantId);
     if (!j) return res.status(404).json({ error: "job not found" });
     if (!["queued", "blocked"].includes(j.status))
       return res
@@ -198,7 +201,7 @@ app.post("/jobs/:id/status", auth, async (req: A, res) => {
   const p = transition.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.flatten() });
   const repo = await getRepository();
-  const j = await repo.getJob(String(req.params.id));
+  const j = await repo.getJob(String(req.params.id), req.user!.tenantId);
   if (!j) return res.status(404).json({ error: "job not found" });
   if (req.user!.role === "technician" && j.assigned_to !== req.user!.sub)
     return res.status(403).json({ error: "not assigned to you" });
@@ -220,7 +223,7 @@ app.post("/jobs/:id/status", auth, async (req: A, res) => {
 });
 app.post("/jobs/:id/media/presign", auth, async (req: A, res) => {
   const repo = await getRepository();
-  const j = await repo.getJob(String(req.params.id));
+  const j = await repo.getJob(String(req.params.id), req.user!.tenantId);
   if (!j) return res.status(404).json({ error: "job not found" });
   if (req.user!.role === "technician" && j.assigned_to !== req.user!.sub)
     return res.status(403).json({ error: "not assigned to you" });
