@@ -69,7 +69,7 @@ async function audit(
   jobId: string,
   metadata: unknown = {},
 ) {
-  (await getRepository()).addAudit({ actorId, action, jobId, metadata });
+  await (await getRepository()).addAudit({ actorId, action, jobId, metadata });
 }
 
 app.get("/health", async (_, res) =>
