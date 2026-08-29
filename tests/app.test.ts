@@ -3,7 +3,7 @@ import request from "supertest";
 import app from "../src/app.js";
 import { db } from "../src/db.js";
 beforeEach(() => {
-  for (const t of ["audit", "media", "jobs", "users"])
+  for (const t of ["outbox", "audit", "media", "jobs", "users"])
     db.prepare(`DELETE FROM ${t}`).run();
 });
 describe("FieldDesk lifecycle", () => {
@@ -39,5 +39,10 @@ describe("FieldDesk lifecycle", () => {
       .set("Authorization", `Bearer ${l.body.token}`)
       .send({ status: "completed" });
     expect(bad.status).toBe(409);
+    const outbox = await request(app)
+      .get("/outbox")
+      .set("Authorization", `Bearer ${l.body.token}`);
+    expect(outbox.status).toBe(200);
+    expect(outbox.body.some((entry: { topic: string }) => entry.topic === "fielddesk.job.created")).toBe(true);
   });
 });

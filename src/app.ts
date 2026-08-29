@@ -273,6 +273,17 @@ app.post("/jobs/:id/media/:mediaId/complete", auth, async (req: A, res) => {
 app.get("/audit", auth, allow("dispatcher", "admin"), async (_, res) =>
   res.json(await (await getRepository()).listAudit()),
 );
+app.get("/outbox", auth, allow("dispatcher", "admin"), async (req, res) =>
+  res.json(await (await getRepository()).listOutbox({
+    pendingOnly: req.query.pendingOnly !== "false",
+    limit: req.query.limit === undefined ? undefined : Number(req.query.limit),
+  })),
+);
+app.post("/outbox/:id/publish", auth, allow("dispatcher", "admin"), async (req, res) => {
+  const published = await (await getRepository()).markOutboxPublished(String(req.params.id));
+  if (!published) return res.status(404).json({ error: "outbox event not found or already published" });
+  res.status(204).send();
+});
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
   res.status(500).json({ error: "internal error" });

@@ -4,7 +4,7 @@ import { db } from "../src/db.js";
 import { createLocalRepository } from "../src/repository.js";
 
 beforeEach(() => {
-  for (const table of ["audit", "media", "jobs", "users"])
+  for (const table of ["outbox", "audit", "media", "jobs", "users"])
     db.prepare(`DELETE FROM ${table}`).run();
 });
 
