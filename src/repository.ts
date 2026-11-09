@@ -8,6 +8,7 @@ export type UserRow = {
   email: string;
   role: UserRole;
   password_hash: string;
+  tenant_id: string;
 };
 export type JobRow = {
   id: string;
@@ -20,6 +21,7 @@ export type JobRow = {
   due_at: string;
   created_by: string;
   created_at: string;
+  tenant_id: string;
 };
 export type MediaRow = {
   id: string;
@@ -40,11 +42,10 @@ export interface FieldDeskRepository {
     email: string;
     role: UserRole;
     passwordHash: string;
+    tenantId?: string;
   }): Promise<void>;
   getUserByEmail(email: string): Promise<UserRow | undefined>;
-  getTechnician(
-    id: string,
-  ): Promise<{ id: string; role: UserRole } | undefined>;
+  getTechnician(id: string, tenantId?: string): Promise<{ id: string; role: UserRole; tenant_id?: string } | undefined>;
   createJob(input: {
     id: string;
     title: string;
@@ -53,9 +54,10 @@ export interface FieldDeskRepository {
     site: string;
     dueAt: string;
     createdBy: string;
+    tenantId?: string;
   }): Promise<void>;
-  listJobs(role: UserRole, userId: string): Promise<JobRow[]>;
-  getJob(id: string): Promise<JobRow | undefined>;
+  listJobs(role: UserRole, userId: string, tenantId?: string): Promise<JobRow[]>;
+  getJob(id: string, tenantId?: string): Promise<JobRow | undefined>;
   assignJob(id: string, technicianId: string): Promise<void>;
   updateJobStatus(id: string, status: string): Promise<void>;
   addMedia(input: {
@@ -83,22 +85,24 @@ class LocalRepository implements FieldDeskRepository {
     email: string;
     role: UserRole;
     passwordHash: string;
+    tenantId?: string;
   }) {
-    db.prepare("INSERT INTO users VALUES (?,?,?,?,?)").run(
+    db.prepare("INSERT INTO users (id,email,role,password_hash,created_at,tenant_id) VALUES (?,?,?,?,?,?)").run(
       input.id,
       input.email,
       input.role,
       input.passwordHash,
       new Date().toISOString(),
+      input.tenantId ?? "default",
     );
   }
   async getUserByEmail(email: string) {
     return db
-      .prepare("SELECT id,email,role,password_hash FROM users WHERE email=?")
+      .prepare("SELECT id,email,role,password_hash,tenant_id FROM users WHERE email=?")
       .get(email) as UserRow | undefined;
   }
-  async getTechnician(id: string) {
-    return db.prepare("SELECT id,role FROM users WHERE id=?").get(id) as
+  async getTechnician(id: string, tenantId = "default") {
+    return db.prepare("SELECT id,role,tenant_id FROM users WHERE id=? AND tenant_id=?").get(id, tenantId) as
       | { id: string; role: UserRole }
       | undefined;
   }
@@ -110,8 +114,9 @@ class LocalRepository implements FieldDeskRepository {
     site: string;
     dueAt: string;
     createdBy: string;
+    tenantId?: string;
   }) {
-    db.prepare("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+    db.prepare("INSERT INTO jobs (id,title,description,priority,site,status,assigned_to,due_at,created_by,created_at,tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
       i.id,
       i.title,
       i.description,
@@ -122,21 +127,22 @@ class LocalRepository implements FieldDeskRepository {
       i.dueAt,
       i.createdBy,
       new Date().toISOString(),
+      i.tenantId ?? "default",
     );
   }
-  async listJobs(role: UserRole, userId: string) {
+  async listJobs(role: UserRole, userId: string, tenantId = "default") {
     return (
       role === "technician"
         ? db
             .prepare(
-              "SELECT * FROM jobs WHERE assigned_to=? OR assigned_to IS NULL ORDER BY due_at",
+              "SELECT * FROM jobs WHERE tenant_id=? AND (assigned_to=? OR assigned_to IS NULL) ORDER BY due_at",
             )
-            .all(userId)
-        : db.prepare("SELECT * FROM jobs ORDER BY due_at").all()
+            .all(tenantId, userId)
+        : db.prepare("SELECT * FROM jobs WHERE tenant_id=? ORDER BY due_at").all(tenantId)
     ) as JobRow[];
   }
-  async getJob(id: string) {
-    return db.prepare("SELECT * FROM jobs WHERE id=?").get(id) as
+  async getJob(id: string, tenantId = "default") {
+    return db.prepare("SELECT * FROM jobs WHERE id=? AND tenant_id=?").get(id, tenantId) as
       | JobRow
       | undefined;
   }
@@ -206,23 +212,24 @@ class PostgresRepository implements FieldDeskRepository {
     email: string;
     role: UserRole;
     passwordHash: string;
+    tenantId?: string;
   }) {
     await this.executor.query(
-      "INSERT INTO fielddesk_users (id,email,role,password_hash,created_at) VALUES ($1,$2,$3,$4,NOW())",
-      [i.id, i.email, i.role, i.passwordHash],
+      "INSERT INTO fielddesk_users (id,email,role,password_hash,tenant_id,created_at) VALUES ($1,$2,$3,$4,$5,NOW())",
+      [i.id, i.email, i.role, i.passwordHash, i.tenantId ?? "default"],
     );
   }
   async getUserByEmail(email: string) {
     const r = await this.executor.query(
-      "SELECT id,email,role,password_hash FROM fielddesk_users WHERE email=$1",
+      "SELECT id,email,role,password_hash,tenant_id FROM fielddesk_users WHERE email=$1",
       [email],
     );
     return r.rows[0] as UserRow | undefined;
   }
-  async getTechnician(id: string) {
+  async getTechnician(id: string, tenantId = "default") {
     const r = await this.executor.query(
-      "SELECT id,role FROM fielddesk_users WHERE id=$1",
-      [id],
+      "SELECT id,role,tenant_id FROM fielddesk_users WHERE id=$1 AND tenant_id=$2",
+      [id, tenantId],
     );
     return r.rows[0] as { id: string; role: UserRole } | undefined;
   }
@@ -234,28 +241,30 @@ class PostgresRepository implements FieldDeskRepository {
     site: string;
     dueAt: string;
     createdBy: string;
+    tenantId?: string;
   }) {
     await this.executor.query(
-      "INSERT INTO fielddesk_jobs (id,title,description,priority,site,status,assigned_to,due_at,created_by,created_at) VALUES ($1,$2,$3,$4,$5,'queued',NULL,$6,$7,NOW())",
-      [i.id, i.title, i.description, i.priority, i.site, i.dueAt, i.createdBy],
+      "INSERT INTO fielddesk_jobs (id,title,description,priority,site,status,assigned_to,due_at,created_by,tenant_id,created_at) VALUES ($1,$2,$3,$4,$5,'queued',NULL,$6,$7,$8,NOW())",
+      [i.id, i.title, i.description, i.priority, i.site, i.dueAt, i.createdBy, i.tenantId ?? "default"],
     );
   }
-  async listJobs(role: UserRole, userId: string) {
+  async listJobs(role: UserRole, userId: string, tenantId = "default") {
     const r =
       role === "technician"
         ? await this.executor.query(
-            "SELECT * FROM fielddesk_jobs WHERE assigned_to=$1 OR assigned_to IS NULL ORDER BY due_at",
-            [userId],
+            "SELECT * FROM fielddesk_jobs WHERE tenant_id=$1 AND (assigned_to=$2 OR assigned_to IS NULL) ORDER BY due_at",
+            [tenantId, userId],
           )
         : await this.executor.query(
-            "SELECT * FROM fielddesk_jobs ORDER BY due_at",
+            "SELECT * FROM fielddesk_jobs WHERE tenant_id=$1 ORDER BY due_at",
+            [tenantId],
           );
     return r.rows as JobRow[];
   }
-  async getJob(id: string) {
+  async getJob(id: string, tenantId = "default") {
     const r = await this.executor.query(
-      "SELECT * FROM fielddesk_jobs WHERE id=$1",
-      [id],
+      "SELECT * FROM fielddesk_jobs WHERE id=$1 AND tenant_id=$2",
+      [id, tenantId],
     );
     return r.rows[0] as JobRow | undefined;
   }
