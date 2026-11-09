@@ -32,6 +32,13 @@ export type MediaRow = {
   uploaded_at: string | null;
   created_at: string;
 };
+export type OutboxRow = {
+  id: string;
+  topic: string;
+  payload: string;
+  created_at: string;
+  published_at: string | null;
+};
 export type QueryExecutor = {
   query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
 };
@@ -76,6 +83,8 @@ export interface FieldDeskRepository {
     metadata: unknown;
   }): Promise<void>;
   listAudit(): Promise<any[]>;
+  listOutbox(options?: { pendingOnly?: boolean; limit?: number }): Promise<OutboxRow[]>;
+  markOutboxPublished(id: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -185,19 +194,35 @@ class LocalRepository implements FieldDeskRepository {
     jobId: string;
     metadata: unknown;
   }) {
+    const auditId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const payload = JSON.stringify({ auditId, ...i });
     db.prepare("INSERT INTO audit VALUES (?,?,?,?,?,?)").run(
-      crypto.randomUUID(),
+      auditId,
       i.actorId,
       i.action,
       i.jobId,
       JSON.stringify(i.metadata),
-      new Date().toISOString(),
+      createdAt,
+    );
+    db.prepare("INSERT INTO outbox (id,topic,payload,created_at,published_at) VALUES (?,?,?,?,NULL)").run(
+      crypto.randomUUID(), `fielddesk.${i.action}`, payload, createdAt,
     );
   }
   async listAudit() {
     return db
       .prepare("SELECT * FROM audit ORDER BY created_at DESC LIMIT 200")
       .all();
+  }
+  async listOutbox(options: { pendingOnly?: boolean; limit?: number } = {}) {
+    const limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? 50)));
+    return db
+      .prepare(`SELECT * FROM outbox${options.pendingOnly ? " WHERE published_at IS NULL" : ""} ORDER BY created_at LIMIT ?`)
+      .all(limit) as OutboxRow[];
+  }
+  async markOutboxPublished(id: string) {
+    const result = db.prepare("UPDATE outbox SET published_at=? WHERE id=? AND published_at IS NULL").run(new Date().toISOString(), id);
+    return Number(result.changes) === 1;
   }
   async close() {}
 }
@@ -311,15 +336,20 @@ class PostgresRepository implements FieldDeskRepository {
     jobId: string;
     metadata: unknown;
   }) {
+    const auditId = crypto.randomUUID();
     await this.executor.query(
       "INSERT INTO fielddesk_audit (id,actor_id,action,job_id,metadata,created_at) VALUES ($1,$2,$3,$4,$5,NOW())",
       [
-        crypto.randomUUID(),
+        auditId,
         i.actorId,
         i.action,
         i.jobId,
         JSON.stringify(i.metadata),
       ],
+    );
+    await this.executor.query(
+      "INSERT INTO fielddesk_outbox (id,topic,payload,created_at) VALUES ($1,$2,$3,NOW())",
+      [crypto.randomUUID(), `fielddesk.${i.action}`, JSON.stringify({ auditId, ...i })],
     );
   }
   async listAudit() {
@@ -327,6 +357,21 @@ class PostgresRepository implements FieldDeskRepository {
       "SELECT * FROM fielddesk_audit ORDER BY created_at DESC LIMIT 200",
     );
     return r.rows;
+  }
+  async listOutbox(options: { pendingOnly?: boolean; limit?: number } = {}) {
+    const limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? 50)));
+    const r = await this.executor.query(
+      `SELECT * FROM fielddesk_outbox${options.pendingOnly ? " WHERE published_at IS NULL" : ""} ORDER BY created_at LIMIT $1`,
+      [limit],
+    );
+    return r.rows as OutboxRow[];
+  }
+  async markOutboxPublished(id: string) {
+    const r = await this.executor.query(
+      "UPDATE fielddesk_outbox SET published_at=NOW() WHERE id=$1 AND published_at IS NULL RETURNING id",
+      [id],
+    );
+    return r.rows.length === 1;
   }
   async close() {
     await this.pool?.end();
