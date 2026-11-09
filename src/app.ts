@@ -13,6 +13,7 @@ import {
 } from "./security.js";
 import { createLocalRepository, FieldDeskRepository } from "./repository.js";
 import { buildDispatchPage, classifySla } from "./dispatch.js";
+import { planBulkAssignments } from "./scheduling.js";
 
 const app = express();
 const corsOrigins = (process.env.CORS_ORIGINS ?? "")
@@ -163,6 +164,53 @@ app.get("/jobs/dispatch", auth, async (req: A, res) => {
     pageSize: Number(req.query.pageSize ?? 25),
   });
   res.json(page);
+});
+const bulkDispatch = z.object({
+  jobIds: z.array(z.string().uuid()).min(1).max(100),
+  technicians: z.array(z.object({
+    technicianId: z.string().uuid(),
+    availableFrom: z.string().datetime(),
+    availableTo: z.string().datetime(),
+    sites: z.array(z.string().min(1).max(120)).max(50).optional(),
+    capacity: z.number().int().min(1).max(50).default(1),
+  })).min(1).max(100),
+  dryRun: z.boolean().default(true),
+});
+app.post("/jobs/bulk-dispatch", auth, allow("dispatcher", "admin"), async (req: A, res) => {
+  const parsed = bulkDispatch.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const repo = await getRepository();
+  const uniqueJobIds = [...new Set(parsed.data.jobIds)];
+  const jobs = [];
+  for (const id of uniqueJobIds) {
+    const job = await repo.getJob(id, req.user!.tenantId);
+    if (!job) return res.status(404).json({ error: `job ${id} not found` });
+    if (!["queued", "blocked"].includes(job.status)) continue;
+    jobs.push(job);
+  }
+  const uniqueTechnicians = new Set<string>();
+  for (const slot of parsed.data.technicians) {
+    if (uniqueTechnicians.has(slot.technicianId))
+      return res.status(400).json({ error: `duplicate technician ${slot.technicianId}` });
+    uniqueTechnicians.add(slot.technicianId);
+    const technician = await repo.getTechnician(slot.technicianId, req.user!.tenantId);
+    if (!technician || technician.role !== "technician")
+      return res.status(422).json({ error: `${slot.technicianId} is not a technician in this tenant` });
+  }
+  const plan = planBulkAssignments(jobs, parsed.data.technicians.map((slot) => ({
+    technicianId: slot.technicianId,
+    availableFrom: slot.availableFrom,
+    availableTo: slot.availableTo,
+    sites: slot.sites,
+    capacity: slot.capacity,
+  })));
+  if (!parsed.data.dryRun) {
+    for (const assignment of plan.assignments) {
+      await repo.assignJob(assignment.jobId, assignment.technicianId);
+      await audit(req.user!.sub, "job.bulk_assigned", assignment.jobId, assignment);
+    }
+  }
+  res.status(200).json({ ...plan, dryRun: parsed.data.dryRun, applied: parsed.data.dryRun ? 0 : plan.assignments.length });
 });
 app.get("/jobs/:id/sla", auth, async (req: A, res) => {
   const job = await (await getRepository()).getJob(String(req.params.id), req.user!.tenantId);
