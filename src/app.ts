@@ -12,6 +12,7 @@ import {
   Role,
 } from "./security.js";
 import { createLocalRepository, FieldDeskRepository } from "./repository.js";
+import { buildDispatchPage, classifySla } from "./dispatch.js";
 
 const app = express();
 const corsOrigins = (process.env.CORS_ORIGINS ?? "")
@@ -147,6 +148,25 @@ app.get("/jobs", auth, async (req: A, res) =>
     await (await getRepository()).listJobs(req.user!.role, req.user!.sub),
   ),
 );
+app.get("/jobs/dispatch", auth, async (req: A, res) => {
+  const repo = await getRepository();
+  const jobs = await repo.listJobs(req.user!.role, req.user!.sub);
+  const page = buildDispatchPage(jobs, {
+    site: typeof req.query.site === "string" ? req.query.site : undefined,
+    status: typeof req.query.status === "string" ? req.query.status : undefined,
+    priority: typeof req.query.priority === "string" ? req.query.priority : undefined,
+    search: typeof req.query.search === "string" ? req.query.search : undefined,
+    page: Number(req.query.page ?? 1),
+    pageSize: Number(req.query.pageSize ?? 25),
+  });
+  res.json(page);
+});
+app.get("/jobs/:id/sla", auth, async (req: A, res) => {
+  const job = await (await getRepository()).getJob(String(req.params.id));
+  if (!job) return res.status(404).json({ error: "job not found" });
+  const sla = classifySla(job);
+  res.json({ jobId: job.id, dueAt: job.due_at, status: job.status, ...sla });
+});
 app.post(
   "/jobs/:id/assign",
   auth,
