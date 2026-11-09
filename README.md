@@ -62,3 +62,7 @@ Passwords are stored with `scrypt` and a random per-user salt; JWT signing requi
 Set `DB_URL` or `SUPABASE_DB_URL` with `POSTGRES_ROUTES_ENABLED=true` to select the async managed Postgres repository. The HTTP handlers use parameterized Postgres queries against the checked-in FieldDesk schema; local tests omit these values and use SQLite. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` (or `STORAGE_BUCKET`) for signed uploads. The service-role key is server-only and must never be placed in the mobile client.
 
 Startup does not run DDL against the managed database; apply the checked-in SQL migration before enabling Postgres routes.
+
+## Operations runbooks
+
+FieldDesk's production contracts are maintained as focused runbooks in [`docs/operations`](docs/operations/). The set covers authentication, job-state transitions, media integrity, Supabase migrations, rollout, rollback, and incident response.
