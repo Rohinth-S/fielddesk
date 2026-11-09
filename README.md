@@ -52,3 +52,7 @@ npm test
 ## Design rationale
 
 Explicit transitions make invalid operations observable and prevent a technician from marking an unassigned job complete. Uploads use a two-step presign/complete protocol so large media does not pass through the API process. SQLite is a local reference adapter; production deployment should use Postgres, object-store checksums, an outbox for notifications, and a background reconciliation worker.
+
+## Security
+
+Passwords are stored with `scrypt` and a random per-user salt; JWT signing requires a 32-character secret in production. Configure `CORS_ORIGINS` to the mobile/web origins you actually trust. The local development fallback secret and open-origin behavior are intentionally disabled by the production checks.
